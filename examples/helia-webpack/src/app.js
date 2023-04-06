@@ -6,8 +6,7 @@ import { unixfs } from '@helia/unixfs'
 function App () {
   const [output, setOutput] = useState([])
   const [helia, setHelia] = useState(null)
-  const [fileContent, setFileContent] = useState('')
-  const [fileName, setFileName] = useState('')
+  const [file, setFile] = useState(null)
 
   const terminalEl = useRef(null)
 
@@ -31,7 +30,20 @@ function App () {
     terminalEl.current.scroll({ top: window.terminal.scrollHeight, behavior: 'smooth' })
   }
 
-  const store = async (name, content) => {
+  const readFile = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        resolve(event.target.result)
+      }
+      reader.onerror = (error) => {
+        reject(error)
+      }
+      reader.readAsArrayBuffer(file)
+    })
+  }
+
+  const store = async (file) => {
     let node = helia
 
     if (!helia) {
@@ -44,11 +56,10 @@ function App () {
 
     showStatus(`Connecting to ${node.libp2p.peerId}...`, COLORS.active, node.libp2p.peerId)
 
-    const encoder = new TextEncoder()
-
+    const contentArrayBuffer = await readFile(file)
     const fileToAdd = {
-      path: `${name}`,
-      content: encoder.encode(content)
+      path: `${file.name}`,
+      content: new Uint8Array(contentArrayBuffer)
     }
 
     const fs = unixfs(node)
@@ -57,33 +68,23 @@ function App () {
     const cid = await fs.addFile(fileToAdd, node.blockstore)
 
     showStatus(`Added to ${cid}`, COLORS.success, cid)
-    showStatus('Reading file...', COLORS.active)
-    const decoder = new TextDecoder()
-    let text = ''
-
-    for await (const chunk of fs.cat(cid)) {
-      text += decoder.decode(chunk, {
-        stream: true
-      })
-    }
-
-    showStatus(`\u2514\u2500 ${name} ${text}`)
     showStatus(`Preview: https://ipfs.io/ipfs/${cid}`, COLORS.success)
+
+    // IPNS publish
+    const defaultKey = await node.key.listKeys().next()
+    await node.name.publish(cid, defaultKey.value)
+    showStatus(`Published to IPNS: /ipns/${defaultKey.value.id}`, COLORS.success)
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
 
     try {
-      if (fileName == null || fileName.trim() === '') {
-        throw new Error('File name is missing...')
+      if (file == null) {
+        throw new Error('No file selected...')
       }
 
-      if ((fileContent == null || fileContent.trim() === '')) {
-        throw new Error('File content is missing...')
-      }
-
-      await store(fileName, fileContent)
+      await store(file)
     } catch (err) {
       showStatus(err.message, COLORS.error)
     }
@@ -98,37 +99,25 @@ function App () {
       </header>
 
       <main className="pa4-l bg-snow mw7 mv5 center pa4">
-        <h1 className="pa0 f2 ma0 mb4 aqua tc">Add data to Helia from the browser</h1>
+        <h1 className="pa0 f2 ma0 mb4 aqua tc">Upload a file to Helia from the browser</h1>
 
-        <form id="add-file" onSubmit={handleSubmit}>
-          <label htmlFor="file-name" className="f5 ma0 pb2 aqua fw4 db">Name</label>
+        <form id="upload-file" onSubmit={handleSubmit}>
+          <label htmlFor="file" className="f5 ma0 pb2 aqua fw4 db">Choose a file</label>
           <input
             className="input-reset bn black-80 bg-white pa3 w-100 mb3"
-            id="file-name"
-            name="file-name"
-            type="text"
-            placeholder="file.txt"
+            id="file"
+            name="file"
+            type="file"
             required
-            value={fileName} onChange={(e) => setFileName(e.target.value)}
-          />
-
-          <label htmlFor="file-content" className="f5 ma0 pb2 aqua fw4 db">Content</label>
-          <input
-            className="input-reset bn black-80 bg-white pa3 w-100 mb3 ft"
-            id="file-content"
-            name="file-content"
-            type="text"
-            placeholder="Hello world"
-            required
-            value={fileContent} onChange={(e) => setFileContent(e.target.value)}
+            onChange={(e) => setFile(e.target.files[0])}
           />
 
           <button
             className="button-reset pv3 tc bn bg-animate bg-black-80 hover-bg-aqua white pointer w-100"
-            id="add-submit"
+            id="upload-submit"
             type="submit"
           >
-            Add file
+            Upload file
           </button>
         </form>
 
